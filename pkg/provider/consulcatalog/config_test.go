@@ -264,7 +264,7 @@ func TestDefaultRule(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			configuration := p.buildConfiguration(context.Background(), test.items)
+			configuration := p.buildConfiguration(context.Background(), test.items, nil)
 
 			assert.Equal(t, test.expected, configuration)
 		})
@@ -2334,7 +2334,7 @@ func Test_buildConfiguration(t *testing.T) {
 				test.items[i].Tags = tags
 			}
 
-			configuration := p.buildConfiguration(context.Background(), test.items)
+			configuration := p.buildConfiguration(context.Background(), test.items, nil)
 
 			assert.Equal(t, test.expected, configuration)
 		})

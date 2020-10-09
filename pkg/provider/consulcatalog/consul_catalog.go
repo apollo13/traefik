@@ -21,8 +21,14 @@ import (
 	"github.com/traefik/traefik/v2/pkg/types"
 )
 
-// DefaultTemplateRule The default template for the default rule.
-const DefaultTemplateRule = "Host(`{{ normalize .Name }}`)"
+const (
+	// DefaultTemplateRule The default template for the default rule.
+	DefaultTemplateRule = "Host(`{{ normalize .Name }}`)"
+
+	// ConsulConnectTransportName is the name of the server transport
+	// used for mTLS by connect enabled services.
+	ConsulConnectTransportName = "connect-mtls-transport"
+)
 
 var _ provider.Provider = (*Provider)(nil)
 
@@ -210,7 +216,7 @@ func (p *Provider) getConsulServicesData(ctx context.Context) ([]itemData, error
 				continue
 			}
 
-			extraConf.ConnectEnabled = isConnectEnabled(consulService)
+			extraConf.ConnectEnabled = isConnectProxy(consulService)
 			item.ExtraConf = extraConf
 
 			data = append(data, item)
@@ -219,7 +225,7 @@ func (p *Provider) getConsulServicesData(ctx context.Context) ([]itemData, error
 	return data, nil
 }
 
-func isConnectEnabled(service *api.CatalogService) bool {
+func isConnectProxy(service *api.CatalogService) bool {
 	if service.ServiceProxy == nil {
 		return false
 	}

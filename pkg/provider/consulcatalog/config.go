@@ -4,15 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/traefik/traefik/v2/pkg/tls"
-	"net"
-
 	"github.com/hashicorp/consul/api"
 	"github.com/traefik/traefik/v2/pkg/config/dynamic"
 	"github.com/traefik/traefik/v2/pkg/config/label"
 	"github.com/traefik/traefik/v2/pkg/log"
 	"github.com/traefik/traefik/v2/pkg/provider"
 	"github.com/traefik/traefik/v2/pkg/provider/constraints"
+	"github.com/traefik/traefik/v2/pkg/tls"
+	"net"
 )
 
 func (p *Provider) buildConfiguration(ctx context.Context, items []itemData, tlsInfo *api.LeafCert) *dynamic.Configuration {
@@ -32,10 +31,6 @@ func (p *Provider) buildConfiguration(ctx context.Context, items []itemData, tls
 		if err != nil {
 			logger.Error(err)
 			continue
-		}
-
-		if item.ExtraConf.ConnectEnabled {
-			confFromLabel.TLS = tlsFromLeafCert(tlsInfo)
 		}
 
 		var tcpOrUDP bool
@@ -68,6 +63,14 @@ func (p *Provider) buildConfiguration(ctx context.Context, items []itemData, tls
 			continue
 		}
 
+		if len(confFromLabel.HTTP.ServersTransports) == 0 {
+			confFromLabel.HTTP.ServersTransports = make(map[string]*dynamic.ServersTransport)
+		}
+
+		if tlsInfo != nil {
+			confFromLabel.HTTP.ServersTransports[ConsulConnectTransportName] = mTlsTransport(tlsInfo)
+		}
+
 		err = p.buildServiceConfiguration(ctxSvc, item, confFromLabel.HTTP)
 		if err != nil {
 			logger.Error(err)
@@ -90,14 +93,13 @@ func (p *Provider) buildConfiguration(ctx context.Context, items []itemData, tls
 	return provider.Merge(ctx, configurations)
 }
 
-func tlsFromLeafCert(leaf *api.LeafCert) *dynamic.TLSConfiguration {
-	return &dynamic.TLSConfiguration{
-		Certificates: []*tls.CertAndStores{
+func mTlsTransport(leaf *api.LeafCert) *dynamic.ServersTransport {
+	return &dynamic.ServersTransport{
+		ServerName: leaf.Service,
+		Certificates: tls.Certificates{
 			{
-				Certificate: tls.Certificate{
-					CertFile: tls.FileOrContent(leaf.CertPEM),
-					KeyFile:  tls.FileOrContent(leaf.PrivateKeyPEM),
-				},
+				CertFile: tls.FileOrContent(leaf.CertPEM),
+				KeyFile:  tls.FileOrContent(leaf.PrivateKeyPEM),
 			},
 		},
 	}
@@ -287,6 +289,10 @@ func (p *Provider) addServer(ctx context.Context, item itemData, loadBalancer *d
 
 	loadBalancer.Servers[0].URL = fmt.Sprintf("%s://%s", loadBalancer.Servers[0].Scheme, net.JoinHostPort(item.Address, port))
 	loadBalancer.Servers[0].Scheme = ""
+
+	if item.ExtraConf.ConnectEnabled {
+		loadBalancer.ServersTransport = ConsulConnectTransportName
+	}
 
 	return nil
 }
