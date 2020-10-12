@@ -14,7 +14,7 @@ import (
 	"net"
 )
 
-func (p *Provider) buildConfiguration(ctx context.Context, items []itemData, tlsInfo *api.LeafCert) *dynamic.Configuration {
+func (p *Provider) buildConfiguration(ctx context.Context, items []itemData, certInfo *connectCert) *dynamic.Configuration {
 	configurations := make(map[string]*dynamic.Configuration)
 
 	for _, item := range items {
@@ -67,8 +67,8 @@ func (p *Provider) buildConfiguration(ctx context.Context, items []itemData, tls
 			confFromLabel.HTTP.ServersTransports = make(map[string]*dynamic.ServersTransport)
 		}
 
-		if tlsInfo != nil {
-			confFromLabel.HTTP.ServersTransports[ConsulConnectTransportName] = mTlsTransport(tlsInfo)
+		if certInfo != nil {
+			confFromLabel.HTTP.ServersTransports[connectTransportName(item.Name)] = certInfo.serverTransport(connectTransportName(item.Name))
 		}
 
 		err = p.buildServiceConfiguration(ctxSvc, item, confFromLabel.HTTP)
@@ -93,14 +93,37 @@ func (p *Provider) buildConfiguration(ctx context.Context, items []itemData, tls
 	return provider.Merge(ctx, configurations)
 }
 
-func mTlsTransport(leaf *api.LeafCert) *dynamic.ServersTransport {
+func connectTransportName(n string) string {
+	return "connect-tls-" + n
+}
+
+type connectCert struct {
+	service string
+	root    []string
+	leaf    keyPair
+}
+
+func (c *connectCert) getRoot() []tls.FileOrContent {
+	var result []tls.FileOrContent
+	for _, r := range c.root {
+		result = append(result, tls.FileOrContent(r))
+	}
+	return result
+}
+
+func (c *connectCert) getLeaf() tls.Certificate {
+	return tls.Certificate{
+		CertFile: tls.FileOrContent(c.leaf.cert),
+		KeyFile:  tls.FileOrContent(c.leaf.key),
+	}
+}
+
+func (c *connectCert) serverTransport(sname string) *dynamic.ServersTransport {
 	return &dynamic.ServersTransport{
-		ServerName: leaf.Service,
+		ServerName: sname,
+		RootCAs:    c.getRoot(),
 		Certificates: tls.Certificates{
-			{
-				CertFile: tls.FileOrContent(leaf.CertPEM),
-				KeyFile:  tls.FileOrContent(leaf.PrivateKeyPEM),
-			},
+			c.getLeaf(),
 		},
 	}
 }
@@ -291,7 +314,7 @@ func (p *Provider) addServer(ctx context.Context, item itemData, loadBalancer *d
 	loadBalancer.Servers[0].Scheme = ""
 
 	if item.ExtraConf.ConnectEnabled {
-		loadBalancer.ServersTransport = ConsulConnectTransportName
+		loadBalancer.ServersTransport = connectTransportName(item.Name)
 	}
 
 	return nil

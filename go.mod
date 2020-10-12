@@ -3,7 +3,12 @@ module github.com/traefik/traefik/v2
 go 1.15
 
 require (
+	github.com/Azure/azure-sdk-for-go v40.3.0+incompatible // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20170929234023-d6e3b3328b78 // indirect
+	github.com/Azure/go-autorest/autorest v0.10.0 // indirect
+	github.com/Azure/go-autorest/autorest/azure/auth v0.4.2 // indirect
+	github.com/Azure/go-autorest/autorest/to v0.3.0 // indirect
+	github.com/Azure/go-autorest/autorest/validation v0.2.0 // indirect
 	github.com/BurntSushi/toml v0.3.1
 	github.com/ExpediaDotCom/haystack-client-go v0.0.0-20190315171017-e7edbdf53a61
 	github.com/Masterminds/semver v1.4.2 // indirect
@@ -13,6 +18,7 @@ require (
 	github.com/Shopify/sarama v1.23.1 // indirect
 	github.com/abbot/go-http-auth v0.0.0-00010101000000-000000000000
 	github.com/abronan/valkeyrie v0.0.0-20200127174252-ef4277a138cd
+	github.com/armon/go-metrics v0.3.4 // indirect
 	github.com/aws/aws-sdk-go v1.30.20
 	github.com/c0va23/go-proxyprotocol v0.9.1
 	github.com/cenkalti/backoff/v4 v4.0.2
@@ -43,7 +49,13 @@ require (
 	github.com/gorilla/mux v1.7.3
 	github.com/gorilla/websocket v1.4.2
 	github.com/hashicorp/consul/api v1.7.0
+	github.com/hashicorp/go-hclog v0.12.0
+	github.com/hashicorp/go-immutable-radix v1.2.0 // indirect
+	github.com/hashicorp/go-sockaddr v1.0.2 // indirect
+	github.com/hashicorp/go-uuid v1.0.2 // indirect
 	github.com/hashicorp/go-version v1.2.0
+	github.com/hashicorp/golang-lru v0.5.4 // indirect
+	github.com/hashicorp/serf v0.9.4 // indirect
 	github.com/influxdata/influxdb1-client v0.0.0-20191209144304-8bf82d3c094d
 	github.com/instana/go-sensor v1.5.1
 	github.com/libkermit/compose v0.0.0-20171122111507-c04e39c026ad
@@ -53,8 +65,10 @@ require (
 	github.com/mailgun/ttlmap v0.0.0-20170619185759-c1c17f74874f
 	github.com/miekg/dns v1.1.31
 	github.com/mitchellh/copystructure v1.0.0
+	github.com/mitchellh/go-testing-interface v1.14.0 // indirect
 	github.com/mitchellh/hashstructure v1.0.0
 	github.com/mitchellh/mapstructure v1.3.3
+	github.com/mitchellh/reflectwalk v1.0.1 // indirect
 	github.com/morikuni/aec v0.0.0-20170113033406-39771216ff4c // indirect
 	github.com/opencontainers/go-digest v1.0.0-rc1 // indirect
 	github.com/opencontainers/image-spec v1.0.1 // indirect
@@ -65,8 +79,8 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/philhofer/fwd v1.0.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0
-	github.com/prometheus/client_golang v1.3.0
-	github.com/prometheus/client_model v0.1.0
+	github.com/prometheus/client_golang v1.4.0
+	github.com/prometheus/client_model v0.2.0
 	github.com/rancher/go-rancher-metadata v0.0.0-20200311180630-7f4c936a06ac
 	github.com/sirupsen/logrus v1.4.2
 	github.com/stretchr/testify v1.6.1

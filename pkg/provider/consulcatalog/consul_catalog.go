@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/hashicorp/consul/api/watch"
+	"github.com/hashicorp/go-hclog"
+	"github.com/sirupsen/logrus"
 	"strconv"
 	"strings"
 	"text/template"
@@ -24,10 +27,6 @@ import (
 const (
 	// DefaultTemplateRule The default template for the default rule.
 	DefaultTemplateRule = "Host(`{{ normalize .Name }}`)"
-
-	// ConsulConnectTransportName is the name of the server transport
-	// used for mTLS by connect enabled services.
-	ConsulConnectTransportName = "connect-mtls-transport"
 )
 
 var _ provider.Provider = (*Provider)(nil)
@@ -62,7 +61,7 @@ type Provider struct {
 
 	client         *api.Client
 	defaultRuleTpl *template.Template
-	tlsChan        chan *api.LeafCert
+	certChan       chan *connectCert
 }
 
 // EndpointConfig holds configurations of the endpoint.
@@ -96,7 +95,7 @@ func (p *Provider) SetDefaults() {
 	p.Prefix = "traefik"
 	p.ExposedByDefault = true
 	p.DefaultRule = DefaultTemplateRule
-	p.tlsChan = make(chan *api.LeafCert)
+	p.certChan = make(chan *connectCert)
 }
 
 // Init the provider.
@@ -123,8 +122,8 @@ func (p *Provider) Provide(configurationChan chan<- dynamic.Message, pool *safe.
 
 		operation := func() error {
 			var (
-				err       error
-				tlsConfig *api.LeafCert
+				err      error
+				certInfo *connectCert
 			)
 
 			p.client, err = createClient(p.Endpoint)
@@ -140,7 +139,7 @@ func (p *Provider) Provide(configurationChan chan<- dynamic.Message, pool *safe.
 			// that gets resolved before the certificates are available
 			// will cause an error condition.
 			if p.ConnectAware {
-				tlsConfig = <-p.tlsChan
+				certInfo = <-p.certChan
 			}
 
 			for {
@@ -152,12 +151,12 @@ func (p *Provider) Provide(configurationChan chan<- dynamic.Message, pool *safe.
 						return err
 					}
 
-					configuration := p.buildConfiguration(routineCtx, data, tlsConfig)
+					configuration := p.buildConfiguration(routineCtx, data, certInfo)
 					configurationChan <- dynamic.Message{
 						ProviderName:  "consulcatalog",
 						Configuration: configuration,
 					}
-				case tlsConfig = <-p.tlsChan:
+				case certInfo = <-p.certChan:
 					// nothing much to do, next ticker cycle will propagate
 					// the updates.
 				case <-routineCtx.Done():
@@ -356,46 +355,136 @@ func (p *Provider) registerConnectService(ctx context.Context) {
 	}
 }
 
+func rootsWatchHandler(logger log.Logger, dest chan<- []string) func(watch.BlockingParamVal, interface{}) {
+	return func(_ watch.BlockingParamVal, raw interface{}) {
+		if raw == nil {
+			return
+		}
+
+		v, ok := raw.(*api.CARootList)
+		if !ok || v == nil {
+			logger.Errorf("invalid result for root certificate watcher")
+			return
+		}
+
+		roots := make([]string, len(v.Roots))
+		for _, root := range v.Roots {
+			roots = append(roots, root.RootCertPEM)
+		}
+
+		dest <- roots
+	}
+}
+
+type keyPair struct {
+	cert string
+	key  string
+}
+
+func leafWatcherHandler(logger log.Logger, dest chan<- keyPair) func(watch.BlockingParamVal, interface{}) {
+	return func(_ watch.BlockingParamVal, raw interface{}) {
+		if raw == nil {
+			return
+		}
+
+		v, ok := raw.(*api.LeafCert)
+		if !ok || v == nil {
+			logger.Errorf("invalid result for leaf certificate watcher")
+			return
+		}
+
+		dest <- keyPair{
+			cert: v.CertPEM,
+			key:  v.PrivateKeyPEM,
+		}
+	}
+}
+
 func (p *Provider) watchConnectTls(ctx context.Context) {
 	ctxLog := log.With(ctx, log.Str(log.ProviderName, "consulcatalog"))
 	logger := log.FromContext(ctxLog)
 
-	operation := func() error {
-		client, err := createClient(p.Endpoint)
+	client, err := createClient(p.Endpoint)
+	if err != nil {
+		logger.WithError(err).Errorf("failed to create consul client")
+		return
+	}
+
+	leafWatcher, err := watch.Parse(map[string]interface{}{
+		"type":    "connect_leaf",
+		"service": p.ServiceName,
+	})
+
+	if err != nil {
+		logger.WithError(err).Error("failed to create leaf cert watcher plan")
+		return
+	}
+
+	rootWatcher, err := watch.Parse(map[string]interface{}{
+		"type": "connect_roots",
+	})
+
+	if err != nil {
+		logger.WithError(err).Error("failed to create root cert watcher plan")
+	}
+
+	leafChan := make(chan keyPair)
+	rootChan := make(chan []string)
+
+	leafWatcher.HybridHandler = leafWatcherHandler(logger, leafChan)
+	rootWatcher.HybridHandler = rootsWatchHandler(logger, rootChan)
+
+	logOpts := &hclog.LoggerOptions{
+		Name:       "consulcatalog",
+		Level:      hclog.LevelFromString(logrus.GetLevel().String()),
+		JSONFormat: true,
+	}
+
+	hclogger := hclog.New(logOpts)
+
+	go func() {
+		err := leafWatcher.RunWithClientAndHclog(client, hclogger)
 		if err != nil {
-			return fmt.Errorf("failed to create consul client. %s", err)
+			logger.WithError(err).Errorf("Leaf certificate watcher failed with error")
 		}
+	}()
 
-		qopts := &api.QueryOptions{
-			AllowStale:        p.Stale,
-			RequireConsistent: p.RequireConsistent,
-			UseCache:          p.Cache,
+	go func() {
+		err := rootWatcher.RunWithClientAndHclog(client, hclogger)
+		if err != nil {
+			logger.WithError(err).Errorf("Root certificate watcher failed with error")
 		}
+	}()
 
-		ticker := time.NewTicker(time.Duration(p.RefreshInterval))
+	leafCerts := <-leafChan
+	rootCerts := <-rootChan
 
-		for {
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-ticker.C:
-				resp, _, err := client.Agent().ConnectCALeaf(p.ServiceName, qopts.WithContext(ctx))
-				if err != nil {
-					return fmt.Errorf("failed to fetch TLS leaf certificates. %s", err)
-				}
+	certInfo := &connectCert{
+		service: p.ServiceName,
+		root:    rootCerts,
+		leaf:    leafCerts,
+	}
 
-				p.tlsChan <- resp
+	p.certChan <- certInfo
+
+	ticker := time.NewTicker(time.Duration(p.RefreshInterval))
+
+	for {
+		select {
+		case <-ctx.Done():
+			ticker.Stop()
+			return
+
+		case rootCerts = <-rootChan:
+		case leafCerts = <-leafChan:
+
+		case <-ticker.C:
+			p.certChan <- &connectCert{
+				service: p.ServiceName,
+				root:    rootCerts,
+				leaf:    leafCerts,
 			}
 		}
-	}
-
-	notify := func(err error, time time.Duration) {
-		logger.WithError(err).Errorf("failed to retrieve leaf certificates from consul. retrying in %s", time)
-	}
-
-	err := backoff.RetryNotify(safe.OperationWithRecover(operation), backoff.WithContext(job.NewBackOff(backoff.NewExponentialBackOff()), ctxLog), notify)
-	if err != nil {
-		logger.WithError(err).Errorf("Cannot read Connect TLS certificates from consul agent")
 	}
 }
 
