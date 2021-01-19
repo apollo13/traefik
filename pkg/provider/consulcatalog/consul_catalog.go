@@ -113,7 +113,7 @@ func (p *Provider) Init() error {
 func (p *Provider) Provide(configurationChan chan<- dynamic.Message, pool *safe.Pool) error {
 	if p.ConnectAware {
 		pool.GoCtx(p.registerConnectService)
-		pool.GoCtx(p.watchConnectTls)
+		pool.GoCtx(p.watchConnectTLS)
 	}
 
 	pool.GoCtx(func(routineCtx context.Context) {
@@ -318,10 +318,10 @@ func (p *Provider) registerConnectService(ctx context.Context) {
 		return
 	}
 
-	serviceId := uuid.New().String()
+	serviceID := uuid.New().String()
 	operation := func() error {
 		regReq := &api.AgentServiceRegistration{
-			ID:   serviceId,
+			ID:   serviceID,
 			Kind: api.ServiceKindTypical,
 			Name: p.ServiceName,
 			Port: p.ServicePort,
@@ -349,7 +349,7 @@ func (p *Provider) registerConnectService(ctx context.Context) {
 	}
 
 	<-ctx.Done()
-	err = client.Agent().ServiceDeregister(serviceId)
+	err = client.Agent().ServiceDeregister(serviceID)
 	if err != nil {
 		logger.WithError(err).Error("failed to deregister traefik from consul catalog")
 	}
@@ -400,7 +400,7 @@ func leafWatcherHandler(logger log.Logger, dest chan<- keyPair) func(watch.Block
 	}
 }
 
-func (p *Provider) watchConnectTls(ctx context.Context) {
+func (p *Provider) watchConnectTLS(ctx context.Context) {
 	ctxLog := log.With(ctx, log.Str(log.ProviderName, "consulcatalog"))
 	logger := log.FromContext(ctxLog)
 
