@@ -3,14 +3,15 @@ package consulcatalog
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/hashicorp/consul/api/watch"
-	"github.com/hashicorp/go-hclog"
-	"github.com/sirupsen/logrus"
 	"strconv"
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/hashicorp/consul/api/watch"
+	"github.com/hashicorp/go-hclog"
+	"github.com/sirupsen/logrus"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/hashicorp/consul/api"
@@ -54,14 +55,20 @@ type Provider struct {
 	Cache             bool            `description:"Use local agent caching for catalog reads." json:"cache,omitempty" toml:"cache,omitempty" yaml:"cache,omitempty" export:"true"`
 	ExposedByDefault  bool            `description:"Expose containers by default." json:"exposedByDefault,omitempty" toml:"exposedByDefault,omitempty" yaml:"exposedByDefault,omitempty" export:"true"`
 	DefaultRule       string          `description:"Default rule." json:"defaultRule,omitempty" toml:"defaultRule,omitempty" yaml:"defaultRule,omitempty"`
-	ConnectAware      bool            `description:"Enable Consul Connect support." json:"connectAware,omitEmpty" toml:"connectAware,omitempty" yaml:"connectAware,omitEmpty"`
-	ConnectNative     bool            `description:"Register and manage traefik in Consul Catalog as a Connect Native service." json:"connectNative,omitempty" toml:"connectNative,omitempty" yaml:"connectNative,omitempty"`
+	Connect           *ConnectConfig  `description:"Consul Connect settings." json:"connectAware,omitEmpty" toml:"connectAware,omitempty" yaml:"connectAware,omitEmpty"`
 	ServiceName       string          `description:"Name of the traefik service in Consul Catalog." json:"serviceName,omitempty" toml:"serviceName,omitempty" yaml:"serviceName,omitempty"`
 	ServicePort       int             `description:"Port of the traefik service to register in Consul Catalog" json:"servicePort,omitempty" toml:"servicePort,omitempty" yaml:"servicePort,omitempty"`
 
 	client         *api.Client
 	defaultRuleTpl *template.Template
 	certChan       chan *connectCert
+}
+
+// ConnectConfig holds the configuration of the settings used to communicate through Consul Connect
+type ConnectConfig struct {
+	ConnectAware bool `description:"Enable Consul Connect support." json:"connectAware,omitEmpty" toml:"connectAware,omitempty" yaml:"connectAware,omitEmpty"`
+	// NOTE: Unless the certificates are issued by a trusted authority, this needs to be set as true
+	InsecureSkipVerify bool `description:"Skip verifying certificates for communicating with Consul Connect services." json:"insecureSkipVerify,omitempty" toml:"insecureSkipVerify,omitempty" yaml:"insecureSkipVerify,omitempty"`
 }
 
 // EndpointConfig holds configurations of the endpoint.
@@ -80,6 +87,12 @@ func (c *EndpointConfig) SetDefaults() {
 	c.Address = "http://127.0.0.1:8500"
 }
 
+// SetDefaults set the default values when using Consul Connect
+func (c *ConnectConfig) SetDefaults() {
+	c.ConnectAware = false
+	c.InsecureSkipVerify = true
+}
+
 // EndpointHTTPAuthConfig holds configurations of the authentication.
 type EndpointHTTPAuthConfig struct {
 	Username string `description:"Basic Auth username" json:"username,omitempty" toml:"username,omitempty" yaml:"username,omitempty" export:"true"`
@@ -90,11 +103,14 @@ type EndpointHTTPAuthConfig struct {
 func (p *Provider) SetDefaults() {
 	endpoint := &EndpointConfig{}
 	endpoint.SetDefaults()
+	connect := &ConnectConfig{}
+	connect.SetDefaults()
 	p.Endpoint = endpoint
 	p.RefreshInterval = ptypes.Duration(15 * time.Second)
 	p.Prefix = "traefik"
 	p.ExposedByDefault = true
 	p.DefaultRule = DefaultTemplateRule
+	p.Connect = connect
 	p.certChan = make(chan *connectCert)
 }
 
@@ -111,7 +127,7 @@ func (p *Provider) Init() error {
 
 // Provide allows the consul catalog provider to provide configurations to traefik using the given configuration channel.
 func (p *Provider) Provide(configurationChan chan<- dynamic.Message, pool *safe.Pool) error {
-	if p.ConnectAware {
+	if p.Connect.ConnectAware {
 		pool.GoCtx(p.registerConnectService)
 		pool.GoCtx(p.watchConnectTLS)
 	}
@@ -138,7 +154,7 @@ func (p *Provider) Provide(configurationChan chan<- dynamic.Message, pool *safe.
 			// the service watcher, otherwise a connect enabled service
 			// that gets resolved before the certificates are available
 			// will cause an error condition.
-			if p.ConnectAware {
+			if p.Connect.ConnectAware {
 				certInfo = <-p.certChan
 			}
 
@@ -301,7 +317,7 @@ func contains(values []string, val string) bool {
 }
 
 func (p *Provider) registerConnectService(ctx context.Context) {
-	if !p.ConnectNative {
+	if !p.Connect.ConnectAware {
 		return
 	}
 
@@ -460,9 +476,10 @@ func (p *Provider) watchConnectTLS(ctx context.Context) {
 	rootCerts := <-rootChan
 
 	certInfo := &connectCert{
-		service: p.ServiceName,
-		root:    rootCerts,
-		leaf:    leafCerts,
+		service:            p.ServiceName,
+		insecureSkipVerify: p.Connect.InsecureSkipVerify,
+		root:               rootCerts,
+		leaf:               leafCerts,
 	}
 
 	p.certChan <- certInfo

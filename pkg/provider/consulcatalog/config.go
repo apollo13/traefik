@@ -98,9 +98,10 @@ func connectTransportName(n string) string {
 }
 
 type connectCert struct {
-	service string
-	root    []string
-	leaf    keyPair
+	service            string
+	insecureSkipVerify bool
+	root               []string
+	leaf               keyPair
 }
 
 func (c *connectCert) getRoot() []tls.FileOrContent {
@@ -120,8 +121,9 @@ func (c *connectCert) getLeaf() tls.Certificate {
 
 func (c *connectCert) serverTransport(sname string) *dynamic.ServersTransport {
 	return &dynamic.ServersTransport{
-		ServerName: sname,
-		RootCAs:    c.getRoot(),
+		ServerName:         sname,
+		InsecureSkipVerify: c.insecureSkipVerify,
+		RootCAs:            c.getRoot(),
 		Certificates: tls.Certificates{
 			c.getLeaf(),
 		},
@@ -310,12 +312,13 @@ func (p *Provider) addServer(ctx context.Context, item itemData, loadBalancer *d
 		return errors.New("address is missing")
 	}
 
-	loadBalancer.Servers[0].URL = fmt.Sprintf("%s://%s", loadBalancer.Servers[0].Scheme, net.JoinHostPort(item.Address, port))
-	loadBalancer.Servers[0].Scheme = ""
-
 	if item.ExtraConf.ConnectEnabled {
 		loadBalancer.ServersTransport = connectTransportName(item.Name)
+		loadBalancer.Servers[0].Scheme = "https"
 	}
+
+	loadBalancer.Servers[0].URL = fmt.Sprintf("%s://%s", loadBalancer.Servers[0].Scheme, net.JoinHostPort(item.Address, port))
+	loadBalancer.Servers[0].Scheme = ""
 
 	return nil
 }
