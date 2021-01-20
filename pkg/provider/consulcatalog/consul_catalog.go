@@ -476,10 +476,9 @@ func (p *Provider) watchConnectTLS(ctx context.Context) {
 	rootCerts := <-rootChan
 
 	certInfo := &connectCert{
-		service:            p.ServiceName,
-		insecureSkipVerify: p.Connect.InsecureSkipVerify,
-		root:               rootCerts,
-		leaf:               leafCerts,
+		service: p.ServiceName,
+		root:    rootCerts,
+		leaf:    leafCerts,
 	}
 
 	p.certChan <- certInfo
