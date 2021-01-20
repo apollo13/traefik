@@ -1,6 +1,7 @@
 package dynamic
 
 import (
+	gtls "crypto/tls"
 	"reflect"
 	"time"
 
@@ -208,6 +209,8 @@ type ServersTransport struct {
 	Certificates        tls.Certificates    `description:"Certificates for mTLS." json:"certificates,omitempty" toml:"certificates,omitempty" yaml:"certificates,omitempty"`
 	MaxIdleConnsPerHost int                 `description:"If non-zero, controls the maximum idle (keep-alive) to keep per-host. If zero, DefaultMaxIdleConnsPerHost is used" json:"maxIdleConnsPerHost,omitempty" toml:"maxIdleConnsPerHost,omitempty" yaml:"maxIdleConnsPerHost,omitempty" export:"true"`
 	ForwardingTimeouts  *ForwardingTimeouts `description:"Timeouts for requests forwarded to the backend servers." json:"forwardingTimeouts,omitempty" toml:"forwardingTimeouts,omitempty" yaml:"forwardingTimeouts,omitempty" export:"true"`
+	// TODO: Verify with traefik team if there is a better way to expose this
+	VerifyConnection func(*gtls.Config, gtls.ConnectionState) error `json:"-"`
 }
 
 // +k8s:deepcopy-gen=true
