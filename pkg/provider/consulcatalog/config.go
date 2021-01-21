@@ -2,8 +2,13 @@ package consulcatalog
 
 import (
 	"context"
+	gtls "crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
+	"time"
+
 	"github.com/hashicorp/consul/api"
 	"github.com/traefik/traefik/v2/pkg/config/dynamic"
 	"github.com/traefik/traefik/v2/pkg/config/label"
@@ -11,7 +16,6 @@ import (
 	"github.com/traefik/traefik/v2/pkg/provider"
 	"github.com/traefik/traefik/v2/pkg/provider/constraints"
 	"github.com/traefik/traefik/v2/pkg/tls"
-	"net"
 )
 
 func (p *Provider) buildConfiguration(ctx context.Context, items []itemData, certInfo *connectCert) *dynamic.Configuration {
@@ -67,7 +71,7 @@ func (p *Provider) buildConfiguration(ctx context.Context, items []itemData, cer
 			confFromLabel.HTTP.ServersTransports = make(map[string]*dynamic.ServersTransport)
 		}
 
-		if certInfo != nil {
+		if item.ExtraConf.ConnectEnabled {
 			confFromLabel.HTTP.ServersTransports[connectTransportName(item.Name)] = certInfo.serverTransport(connectTransportName(item.Name))
 		}
 
@@ -120,10 +124,28 @@ func (c *connectCert) getLeaf() tls.Certificate {
 
 func (c *connectCert) serverTransport(sname string) *dynamic.ServersTransport {
 	return &dynamic.ServersTransport{
-		ServerName: sname,
-		RootCAs:    c.getRoot(),
+		ServerName:         sname,
+		InsecureSkipVerify: true,
+		RootCAs:            c.getRoot(),
 		Certificates: tls.Certificates{
 			c.getLeaf(),
+		},
+		VerifyConnection: func(cfg *gtls.Config, cs gtls.ConnectionState) error {
+			t := cfg.Time
+			if t == nil {
+				t = time.Now
+			}
+			// This is basically what Go itself does sans the hostname validation
+			opts := x509.VerifyOptions{
+				Roots:         cfg.RootCAs,
+				CurrentTime:   t(),
+				Intermediates: x509.NewCertPool(),
+			}
+			for _, cert := range cs.PeerCertificates[1:] {
+				opts.Intermediates.AddCert(cert)
+			}
+			_, err := cs.PeerCertificates[0].Verify(opts)
+			return err
 		},
 	}
 }
@@ -310,12 +332,13 @@ func (p *Provider) addServer(ctx context.Context, item itemData, loadBalancer *d
 		return errors.New("address is missing")
 	}
 
-	loadBalancer.Servers[0].URL = fmt.Sprintf("%s://%s", loadBalancer.Servers[0].Scheme, net.JoinHostPort(item.Address, port))
-	loadBalancer.Servers[0].Scheme = ""
-
 	if item.ExtraConf.ConnectEnabled {
 		loadBalancer.ServersTransport = connectTransportName(item.Name)
+		loadBalancer.Servers[0].Scheme = "https"
 	}
+
+	loadBalancer.Servers[0].URL = fmt.Sprintf("%s://%s", loadBalancer.Servers[0].Scheme, net.JoinHostPort(item.Address, port))
+	loadBalancer.Servers[0].Scheme = ""
 
 	return nil
 }
