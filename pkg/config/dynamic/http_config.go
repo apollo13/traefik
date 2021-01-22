@@ -2,6 +2,7 @@ package dynamic
 
 import (
 	gtls "crypto/tls"
+	"crypto/x509"
 	"reflect"
 	"time"
 
@@ -210,7 +211,7 @@ type ServersTransport struct {
 	MaxIdleConnsPerHost int                 `description:"If non-zero, controls the maximum idle (keep-alive) to keep per-host. If zero, DefaultMaxIdleConnsPerHost is used" json:"maxIdleConnsPerHost,omitempty" toml:"maxIdleConnsPerHost,omitempty" yaml:"maxIdleConnsPerHost,omitempty" export:"true"`
 	ForwardingTimeouts  *ForwardingTimeouts `description:"Timeouts for requests forwarded to the backend servers." json:"forwardingTimeouts,omitempty" toml:"forwardingTimeouts,omitempty" yaml:"forwardingTimeouts,omitempty" export:"true"`
 	// TODO: Verify with traefik team if there is a better way to expose this
-	VerifyConnection func(*gtls.Config, gtls.ConnectionState) error `json:"-"`
+	VerifyPeerCertificate func(cfg *gtls.Config, rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error `json:"-"`
 }
 
 // +k8s:deepcopy-gen=true
