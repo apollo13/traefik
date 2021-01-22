@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/consul/api"
@@ -71,8 +73,8 @@ func (p *Provider) buildConfiguration(ctx context.Context, items []itemData, cer
 			confFromLabel.HTTP.ServersTransports = make(map[string]*dynamic.ServersTransport)
 		}
 
-		if item.ExtraConf.ConnectEnabled {
-			confFromLabel.HTTP.ServersTransports[connectTransportName(item.Name)] = certInfo.serverTransport(connectTransportName(item.Name))
+		if item.ConnectEnabled {
+			confFromLabel.HTTP.ServersTransports[connectTransportName(item.Name)] = certInfo.serverTransport(item)
 		}
 
 		err = p.buildServiceConfiguration(ctxSvc, item, confFromLabel.HTTP)
@@ -122,7 +124,8 @@ func (c *connectCert) getLeaf() tls.Certificate {
 	}
 }
 
-func (c *connectCert) serverTransport(sname string) *dynamic.ServersTransport {
+func (c *connectCert) serverTransport(item itemData) *dynamic.ServersTransport {
+	sname := connectTransportName(item.Name)
 	return &dynamic.ServersTransport{
 		ServerName:         sname,
 		InsecureSkipVerify: true,
@@ -131,11 +134,11 @@ func (c *connectCert) serverTransport(sname string) *dynamic.ServersTransport {
 			c.getLeaf(),
 		},
 		VerifyConnection: func(cfg *gtls.Config, cs gtls.ConnectionState) error {
+			// This is basically what Go itself does sans the hostname validation
 			t := cfg.Time
 			if t == nil {
 				t = time.Now
 			}
-			// This is basically what Go itself does sans the hostname validation
 			opts := x509.VerifyOptions{
 				Roots:         cfg.RootCAs,
 				CurrentTime:   t(),
@@ -144,8 +147,31 @@ func (c *connectCert) serverTransport(sname string) *dynamic.ServersTransport {
 			for _, cert := range cs.PeerCertificates[1:] {
 				opts.Intermediates.AddCert(cert)
 			}
-			_, err := cs.PeerCertificates[0].Verify(opts)
-			return err
+			cert := cs.PeerCertificates[0]
+			_, err := cert.Verify(opts)
+			if err != nil {
+				return err
+			}
+			// Go cert validation done, validate SPIFFE URI now
+
+			// Our certs will only ever have a single URI for now so only check that
+			if len(cert.URIs) < 1 {
+				return errors.New("peer certificate invalid")
+			}
+			gotURI := cert.URIs[0]
+
+			var expectURI url.URL
+			expectURI.Host = gotURI.Host
+			expectURI.Scheme = "spiffe"
+			expectURI.Path = fmt.Sprintf("/ns/%s/dc/%s/svc/%s",
+				item.Namespace, item.Datacenter, item.ConnectDestination)
+
+			if strings.EqualFold(gotURI.String(), expectURI.String()) {
+				return nil
+			}
+
+			return fmt.Errorf("peer certificate mismatch got %s, want %s",
+				gotURI.String(), expectURI.String())
 		},
 	}
 }
@@ -332,7 +358,7 @@ func (p *Provider) addServer(ctx context.Context, item itemData, loadBalancer *d
 		return errors.New("address is missing")
 	}
 
-	if item.ExtraConf.ConnectEnabled {
+	if item.ConnectEnabled {
 		loadBalancer.ServersTransport = connectTransportName(item.Name)
 		loadBalancer.Servers[0].Scheme = "https"
 	}

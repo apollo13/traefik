@@ -33,15 +33,19 @@ const (
 var _ provider.Provider = (*Provider)(nil)
 
 type itemData struct {
-	ID        string
-	Node      string
-	Name      string
-	Address   string
-	Port      string
-	Status    string
-	Labels    map[string]string
-	Tags      []string
-	ExtraConf configuration
+	ID                 string
+	Node               string
+	Datacenter         string
+	Name               string
+	Namespace          string
+	Address            string
+	Port               string
+	Status             string
+	Labels             map[string]string
+	Tags               []string
+	ConnectEnabled     bool
+	ConnectDestination string
+	ExtraConf          configuration
 }
 
 // Provider holds configurations of the provider.
@@ -213,16 +217,27 @@ func (p *Provider) getConsulServicesData(ctx context.Context) ([]itemData, error
 			if address == "" {
 				address = consulService.Address
 			}
+			namespace := consulService.Namespace
+			if namespace == "" {
+				namespace = "default"
+			}
 
 			item := itemData{
-				ID:      consulService.ServiceID,
-				Node:    consulService.Node,
-				Name:    consulService.ServiceName,
-				Address: address,
-				Port:    strconv.Itoa(consulService.ServicePort),
-				Labels:  tagsToNeutralLabels(consulService.ServiceTags, p.Prefix),
-				Tags:    consulService.ServiceTags,
-				Status:  healthServices[i].Checks.AggregatedStatus(),
+				ID:             consulService.ServiceID,
+				Node:           consulService.Node,
+				Datacenter:     consulService.Datacenter,
+				Namespace:      namespace,
+				Name:           consulService.ServiceName,
+				Address:        address,
+				Port:           strconv.Itoa(consulService.ServicePort),
+				Labels:         tagsToNeutralLabels(consulService.ServiceTags, p.Prefix),
+				Tags:           consulService.ServiceTags,
+				Status:         healthServices[i].Checks.AggregatedStatus(),
+				ConnectEnabled: isConnectProxy(consulService),
+			}
+
+			if item.ConnectEnabled {
+				item.ConnectDestination = consulService.ServiceProxy.DestinationServiceName
 			}
 
 			extraConf, err := p.getConfiguration(item)
@@ -230,8 +245,6 @@ func (p *Provider) getConsulServicesData(ctx context.Context) ([]itemData, error
 				log.FromContext(ctx).Errorf("Skip item %s: %v", item.Name, err)
 				continue
 			}
-
-			extraConf.ConnectEnabled = isConnectProxy(consulService)
 			item.ExtraConf = extraConf
 
 			data = append(data, item)
